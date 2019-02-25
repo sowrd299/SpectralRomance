@@ -3,6 +3,9 @@ from random import random
 # a class representing a card that may/may not be heart
 class Card():
 
+    # the constant probability that a card is a heart
+    PROB_HEART = 0.4
+
     # an enum of the types of cards in the game
     HEART = "<3"
     BLANK = "><"
@@ -11,7 +14,8 @@ class Card():
     # DESIGN: because we probably want a minority of opps to be real
     # the average opp should require hearts >= prop_hearts * total cards
     # to keep that number low, prob_hearts should probably be low~ish
-    def __init__(self, prob_heart = 0.33):
+    def __init__(self, prob_heart = None):
+        prob_heart = prob_heart if prob_heart != None else self.PROB_HEART
         # the type the card actually is
         self.type = Card.HEART if prob_heart > random() else Card.BLANK
         # weather or not the player has seen the card
@@ -31,6 +35,10 @@ class Card():
 
 # an oppertunity that someone is flirting with you
 class Opportunity():
+
+    # constants used in the punishment level equasion
+    MAX_TURNS = 10
+    TURNS_DIV = 3
 
     # takes how long the card will be around for
     # how many hearts it needs to be an oppertunity
@@ -60,7 +68,7 @@ class Opportunity():
     # takes a given RNG'd value on [0,1)
     # the lower the number, the more likely it is to end
     def check_over(self, rand):
-        return rand**2 > self.time/10
+        return rand**3 > self.time/10
 
     # reveals the next card
     def reveal_next(self):
@@ -79,8 +87,22 @@ class Opportunity():
                 self._ind_next_revealed -= 1
                 break
 
-    def check_success(self):
-        return sum(x.get_num_hearts() for x in self.cards) >= self.hearts_needed
+    def get_revealed_hearts(self):
+        return sum(card.get_num_hearts() for card in self.cards if card.revealed)
+
+    # returns wether or not this person will say yes if you ask them out
+    # takes whether or not to ignore the "need a face up card" rule
+    def check_success(self, ignore_facing = False):
+        # DESIGN: add in revealed heart req to nerf spamming
+        return sum(x.get_num_hearts() for x in self.cards) >= self.hearts_needed and (self.get_revealed_hearts() > 0 or ignore_facing)
+
+    # returns degree of punishment should be inflicted for asking out incorrectly
+    def  get_punishment_level(self):
+        return (self.MAX_TURNS-self.time)/self.TURNS_DIV + self._ind_next_revealed
+
+    # lose so many cards from its state, lowering odds of getting a date
+    def remove_cards(self, i):
+        self.cards = self.cards[:-i]
 
 
 # IMPLEMENTS INTERFACE EVENT
@@ -106,6 +128,18 @@ class VictoryEvent():
     def __str__(self):
         return "{0} said yes! You have a date! You win!".format(self.opp.name)
 
+# IMPLEMENTS INTERFACE EVENT
+# represent the occurance that the player was rejected when asking someone out
+class RejectionEvent():
+
+    def __init__(self, opp):
+        self.opp = opp
+
+    def __str__(self):
+        text = "{0} said no :( Your reputation has gone down :(".format(self.opp.name)
+        if opp.get_revealed_hearts() < 1: 
+            text += "\nMaybe ask out someone you know has a heart for you next time."
+        return text
 
 # the gamestate
 class Game():
@@ -115,6 +149,9 @@ class Game():
     BOARD_SIZE = 3
     # the number of opps that start in play
     STARTING_OPPS = 1
+    # constants that govern the punishment equasion
+    MIN_PUNISHMENT = 1
+    PUNISHMENT_DIV = 2
 
     # takes the deck of oppertunities for the game
     def __init__(self, deck):
@@ -126,13 +163,17 @@ class Game():
         # populate starting opps
         for i in range(self.STARTING_OPPS):
             self.draw_opp()
+        # whether or not the game is still going
+        self.ongoing = True
 
     # Game and Card Management:
 
     # to be called at the end of each turn
     def end_turn(self):
         # handle opps already in play
-        for opp in self.opps_avail:
+        old_opps_avail = list(self.opps_avail)
+        for opp in old_opps_avail:
+            # do this instead of a normal for-loop to avoid tracking over new replacement opps
             opp.advance_time()
             # handle oppertunities ending
             if(opp.check_over(random())):
@@ -153,8 +194,9 @@ class Game():
         if len(self.opps_deck) > 0:
             self.opps_avail.append(self.opps_deck.pop())
         else:
-            # TODO: handle deck-out
-            pass
+            # TODO: testing implementation for handling deck-out
+            self.event("You are out of time. Everyone has a date already. Game over.")
+            self.ongoing = False
 
     # Game Actions:
     # use these instead of the opportunity versions directly
@@ -169,11 +211,15 @@ class Game():
     # may resault in the player winning
     def ask_out(self, opp):
         if opp.check_success():
-            # TODO: win the game
+            # handle victory
             self.event(VictoryEvent(opp))
+            self.ongoing = False
         else:
-            # TODO: punish the player
-            pass
+            # handle punishment
+            self.event(RejectionEvent(opp))
+            punishment_level = self.MIN_PUNISHMENT + int(opp.get_punishment_level()/self.PUNISHMENT_DIV)
+            for opp in self.opps_avail:
+                opp.remove_cards(punishment_level)
 
     # UI:     
 
@@ -249,19 +295,24 @@ if __name__ == "__main__":
     # create the opp deck
     # TODO: this is a testing implementation
     opps = []
-    for i in range(2):
-        opps.append(Opportunity("Alissa", "Bloop on the nose", 5, 2, 4))
-        opps.append(Opportunity("Bella", "It's now or never", 3, 2, 3))
-        opps.append(Opportunity("Claire", "She touched your hand", 7, 3, 4))
-        opps.append(Opportunity("Dian", "'Where does that leave us?'", 5, 2, 5))
-        opps.append(Opportunity("Elain", "You're not annoying me", 6, 4, 10))
+    for i in range(2): # duplicating because lazy
+        opps.append(Opportunity("Alissa", "Bloop on the nose", 7, 3, 5))
+        opps.append(Opportunity("Benny", "It's now or never", 5, 2, 3))
+        opps.append(Opportunity("Claire", "She touched your hand", 9, 3, 4))
+        opps.append(Opportunity("Dan", "'Where does that leave us?'", 4, 2, 4))
+        opps.append(Opportunity("Elain", "'You're not annoying me'", 8, 4, 8))
+        opps.append(Opportunity("Fred", "'Sing for me'", 9, 4, 6))
+        opps.append(Opportunity("Gianna", "Wrote on your paper", 8, 3, 6))
+    num_chances = sum(1 for opp in opps if opp.check_success(True))
     #start the game
     game = Game(opps)
     ui = TextUI(game)
     # gameloop
-    while True:
+    while game.ongoing:
         ui.disp()
         action, opp = ui.get_player_action()
         action(opp)
         game.end_turn()
         print("\n")
+    # end game statistics
+    print("{0} people wanted to go on a date with you".format(num_chances))
