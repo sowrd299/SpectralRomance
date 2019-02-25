@@ -13,13 +13,13 @@ class Card():
     # to keep that number low, prob_hearts should probably be low~ish
     def __init__(self, prob_heart = 0.33):
         # the type the card actually is
-        self.type = Card.HEART if prob_heart < random() else Card.BLANK
+        self.type = Card.HEART if prob_heart > random() else Card.BLANK
         # weather or not the player has seen the card
         self.revealed = False
 
     # turn the card face up
     def reveal(self):
-        self.reveal = True
+        self.revealed = True
 
     # returns how many hearts the card is worth
     def get_num_hearts(self):
@@ -49,7 +49,7 @@ class Opportunity():
         lines = [None, None, None]
         lines[0] = "Name: {0}; {1}".format(self.name.upper(), self.text)
         lines[1] = "Cards: "+" ".join(str(c) for c in self.cards)
-        lines[2] = "Hearts needed: {0}; Approxtimate time remaining: {1}".format(self.hearts_needed, self.time)
+        lines[2] = "Hearts needed: {0}; Approxtimate time remaining: {1} turns".format(self.hearts_needed, self.time-2)
         return "\n".join(lines)
 
     # advance time in the game (of this one opp)
@@ -65,7 +65,7 @@ class Opportunity():
     # reveals the next card
     def reveal_next(self):
         self.cards[self._ind_next_revealed].reveal()
-        self._int_next_revealed += 1
+        self._ind_next_revealed += 1
 
     # rerolls the first face-up blank card into a new face-down card
     # to raise chances that have enough hearts
@@ -76,6 +76,7 @@ class Opportunity():
             if card.get_num_hearts() < 1 and card.revealed:
                 self.cards.remove(card)
                 self.cards.append(Card())
+                self._ind_next_revealed -= 1
                 break
 
     def check_success(self):
@@ -111,7 +112,7 @@ class Game():
 
     # GAME CONSTANTS
     # the number of opps that should be available at once
-    BOARD_SIZE = 4
+    BOARD_SIZE = 3
     # the number of opps that start in play
     STARTING_OPPS = 1
 
@@ -179,22 +180,69 @@ class Game():
     # handle an event happening that the player need to be informed about
     # here mostly to make it easier to change UI
     def event(self, event):
+        # TODO: this should get tied into/handled by the UI class
         print("\nEVENT!\n{0}\n".format(event))
 
 
 # displays the game as text and takes text-base imput
 class TextUI():
 
+    # INPUT STRINGS FOR GAME ACTIONS
+    # lowercase for easy processing
+    REVEAL = "talk to"
+    REROLL = "joke with"
+    ASK = "ask out"
+    # TODO: add in reminder text for what these actions do
+
     # takes the game it will interact with
     def __init__(self, game):
         self.game = game
+        # setup actions the player can take
+        # implemented as call-backs
+        self.player_actions = { self.REVEAL : game.reveal, self.REROLL : game.reroll, self.ASK : game.ask_out }
 
     # displays the main gamespate
     def disp(self):
         for i,opp in enumerate(self.game.opps_avail):
             # a top bar to mark the number
-            print("=====Opportunity {0}=====".format(i))
+            top_bar = "=====Opportunity {0}=====".format(i)
+            print(top_bar)
             print(opp)
+            print("="*len(top_bar))
+
+    # gets the action the player wants to take
+    def get_player_action(self):
+        # repeat until successfull and return
+        while True:
+            # get input
+            print("\n[ {0} ]...".format(" | ".join(self.player_actions.keys())))
+            print("...[ {0} ]".format(" | ".join(o.name for o in self.game.opps_avail)))
+            action_str = input("Type your action: ").lower()
+            # parse action
+            action = None
+            for a in self.player_actions.keys():
+                # if prefixed by the action
+                if action_str[:len(a)] == a.lower():
+                    action = self.player_actions[a]
+                    break
+            # if we did not sucessfully parse to an action
+            else:
+                print("That action does not exist.".upper())
+                continue
+            # parse opp 
+            opp = None
+            for o in self.game.opps_avail:
+                # if suffixed by the name
+                if action_str[-len(o.name):] == o.name.lower():
+                    opp = o
+                    break
+            # if failed to parse opp
+            else:
+                print("That person does not exist.".upper())
+                continue
+
+            return (action, opp)
+
 
 
 if __name__ == "__main__":
@@ -206,8 +254,14 @@ if __name__ == "__main__":
         opps.append(Opportunity("Bella", "It's now or never", 3, 2, 3))
         opps.append(Opportunity("Claire", "She touched your hand", 7, 3, 4))
         opps.append(Opportunity("Dian", "'Where does that leave us?'", 5, 2, 5))
+        opps.append(Opportunity("Elain", "You're not annoying me", 6, 4, 10))
     #start the game
     game = Game(opps)
     ui = TextUI(game)
     # gameloop
-    ui.disp()
+    while True:
+        ui.disp()
+        action, opp = ui.get_player_action()
+        action(opp)
+        game.end_turn()
+        print("\n")
